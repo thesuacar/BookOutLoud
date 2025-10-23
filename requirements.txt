@@ -1,0 +1,11 @@
+#install required libraries by command pip install -r requirements.txt
+flask
+pyttsx3
+gTTS
+PyMuPDF
+googletrans==4.0.0-rc1
+flask-login
+flask-bcrypt
+pandas
+torch
+PIL
