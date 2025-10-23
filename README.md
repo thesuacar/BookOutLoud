@@ -87,5 +87,7 @@ Here are the most useful Git commands for new team members:
    ```bash
    git push origin feature/your-feature-name
    ```
-Would you like me to tailor this README for **a Python-based Flask project** or **a Node.js + React project**?
-That way, I can make the setup commands specific to your actual tech stack.
+
+Developed with Flickr30k Dataset
+Flickr Image dataset. (2018, June 12). Kaggle. https://www.kaggle.com/datasets/hsankesara/flickr-image-dataset
+
