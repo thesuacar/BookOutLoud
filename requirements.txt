@@ -8,4 +8,4 @@ flask-login
 flask-bcrypt
 pandas
 torch
-PIL
+pillow

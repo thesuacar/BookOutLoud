@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset
-from PIL import Image
+from pillow import Image
 
 #Load and clean captions, mapping to available images.
 def load_captions(images_path, captions_file):
