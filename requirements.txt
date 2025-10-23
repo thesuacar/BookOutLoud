@@ -1,4 +1,5 @@
 #install required libraries by command pip install -r requirements.txt
+#type down required libraries that are not here yet
 flask
 pyttsx3
 gTTS
@@ -9,3 +10,6 @@ flask-bcrypt
 pandas
 torch
 pillow
+torchvision
+torchaudio
+matplotlib
