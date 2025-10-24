@@ -1,4 +1,4 @@
-from preprocessing.preprocessing_utils import FlickrDataset, clean_csv, build_vocab, transforms
+from preprocessing.preprocessing_utils import FlickrDataset, clean_captions_txt, build_vocab, transforms
 from training.training_utils import train_model, evaluate_bleu_fn
 from training.encoders import EncoderCNN,DecoderRNN
 import torch
@@ -8,10 +8,10 @@ nltk.download('punkt', quiet=True)
 def main():
     # Paths to data
     image_path = "data/images/"
-    caption_path = "data/captions.csv"
+    caption_path = "data/captions.txt"
 
-    # Clean CSV and prepare dataset
-    df = clean_csv(image_path, caption_path)
+    # Clean text and prepare dataset
+    df = clean_captions_txt(image_path, caption_path)
 
     # Tokenize captions
     df['tokens'] = df['caption'].apply(nltk.word_tokenize)
