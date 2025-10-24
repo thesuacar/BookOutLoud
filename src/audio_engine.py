@@ -7,7 +7,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
-
 from gtts import gTTS
 
 try:  # Optional dependency for notebook playback

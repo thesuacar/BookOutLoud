@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
-
 import torch
 
 
@@ -34,7 +33,7 @@ class TrainingMetrics:
         }
 
 
-def train_with_early_stopping(
+def train_model(
     encoder: torch.nn.Module,
     decoder: torch.nn.Module,
     train_loader: Iterable,
