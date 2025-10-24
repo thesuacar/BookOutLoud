@@ -13,3 +13,4 @@ pillow
 torchvision
 torchaudio
 matplotlib
+nltk
