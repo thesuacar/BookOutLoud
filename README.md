@@ -39,8 +39,6 @@ cd BookOutLoud
 
 ### 2. Create a Virtual Environment (Python)
 
-If the project uses Python (most likely for AI/audio processing):
-
 ```bash
 python -m venv venv
 source venv/bin/activate     # Mac/Linux
@@ -90,4 +88,5 @@ Here are the most useful Git commands for new team members:
 
 Developed with Flickr30k Dataset
 Flickr Image dataset. (2018, June 12). Kaggle. https://www.kaggle.com/datasets/hsankesara/flickr-image-dataset
+
 
