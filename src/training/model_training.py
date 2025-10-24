@@ -1,6 +1,6 @@
-from preprocessing.preprocessing_utils import FlickrDataset, clean_captions_txt, build_vocab, transforms
-from training.training_utils import train_model, evaluate_bleu_fn
-from training.encoders import EncoderCNN,DecoderRNN
+from src.preprocessing.preprocessing_utils import FlickrDataset, clean_captions_txt, build_vocab, transforms
+from src.training.training_utils import train_model, evaluate_bleu_fn
+from src.training.encoders import EncoderCNN,DecoderRNN
 import torch
 import nltk
 nltk.download('punkt', quiet=True)
