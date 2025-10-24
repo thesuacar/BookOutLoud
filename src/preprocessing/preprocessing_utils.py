@@ -29,21 +29,35 @@ class FlickrDataset(Dataset):
         return img, caption
 
 
-def clean_csv(image_path, caption_path):
-    """Load CSV and remove entries where images are missing"""
+def clean_captions_txt(image_path, caption_path):
 
-    df = pd.read_csv(caption_path, names=['image', 'caption'])
+    data = []
 
-    # Normalize filenames
-    df['image'] = df['image'].str.strip().str.lower()
+    with open(caption_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
 
+            img_with_idx, caption = line.split("\t")
+            img = img_with_idx.split("#")[0].strip().lower()
+            caption = caption.strip()
+
+            data.append((img, caption))
+
+    df = pd.DataFrame(data, columns=["image", "caption"])
+
+    # Keep only images that exist
     available = {f.lower(): f for f in os.listdir(image_path)}
-    df['image'] = df['image'].map(lambda x: available.get(x))
+    df["image"] = df["image"].map(lambda x: available.get(x))
 
-    df = df.dropna(subset=['image']).reset_index(drop=True)
-    print(f"✅ Usable images: {df['image'].nunique()}")
+    df = df.dropna(subset=["image"]).reset_index(drop=True)
+
+    print(f"Total valid image entries: {len(df)}")
+    print(f"Unique usable images: {df['image'].nunique()}")
 
     return df
+
 
 
 def build_vocab(token_lists, vocab_size=1000):
