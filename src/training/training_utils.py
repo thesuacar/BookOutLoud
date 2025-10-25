@@ -1,221 +1,134 @@
 """Utilities for training captioning models with logging and early stopping."""
-
-from __future__ import annotations
-
 import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
 import torch
+import matplotlib.pyplot as plt
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from src.preprocessing.preprocessing_utils import clean_captions_txt, preprocess_dataset
+from src.training.encoders import EncoderCNN, DecoderRNN
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+smooth = SmoothingFunction().method1
 
 
-@dataclass
-class TrainingMetrics:
-    """Stores per-epoch training statistics."""
+def evaluate_bleu(loader, encoder, decoder, inv_vocab, device, n=5):
+    encoder.eval()
+    decoder.eval()
+    scores = []
 
-    epochs: List[int]
-    losses: List[float]
-    bleus: List[float]
-    times: List[float]
-    best_epoch: Optional[int] = None
-    best_bleu: Optional[float] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Return metrics as a JSON-serializable dictionary."""
-        return {
-            "epochs": self.epochs,
-            "losses": self.losses,
-            "bleus": self.bleus,
-            "times": self.times,
-            "best_epoch": self.best_epoch,
-            "best_bleu": self.best_bleu,
-            "total_training_time": sum(self.times),
-        }
-
-
-def train_model(
-    encoder: torch.nn.Module,
-    decoder: torch.nn.Module,
-    train_loader: Iterable,
-    dev_loader: Iterable,
-    criterion: Callable[..., torch.Tensor],
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    vocab_size: int,
-    *,
-    num_epochs: int = 500,
-    eval_interval: int = 10,
-    patience: int = 5,
-    min_delta: float = 0.0,
-    checkpoint_dir: Path | str = "checkpoints",
-    evaluate_bleu_fn: Optional[Callable[..., float]] = None,
-    evaluate_bleu_kwargs: Optional[Dict[str, Any]] = None,
-    verbose: bool = True,
-) -> TrainingMetrics:
-    """Train encoder/decoder modules with periodic evaluation and early stopping.
-
-    Args:
-        encoder: Feature extractor module.
-        decoder: Caption decoder module.
-        train_loader: Dataloader for training samples.
-        dev_loader: Dataloader for validation samples.
-        criterion: Loss function.
-        optimizer: Optimizer.
-        device: Target device for tensors.
-        vocab_size: Vocabulary size for logits reshaping.
-        num_epochs: Maximum number of training epochs.
-        eval_interval: Evaluate BLEU and save checkpoints every N epochs.
-        patience: Stop after this many evaluations without BLEU improvement.
-        min_delta: Minimum BLEU improvement required to reset the patience counter.
-        checkpoint_dir: Directory where checkpoints are persisted.
-        evaluate_bleu_fn: Callable used to compute BLEU; must accept `dev_loader`
-            and any keyword arguments provided through `evaluate_bleu_kwargs`.
-        evaluate_bleu_kwargs: Extra keyword arguments forwarded to `evaluate_bleu_fn`.
-        verbose: If True, prints progress information.
-
-    Returns:
-        TrainingMetrics populated with loss, BLEU, timing data, and best epoch.
-    """
-    if evaluate_bleu_fn is None:
-        raise ValueError("evaluate_bleu_fn must be provided to compute BLEU scores.")
-
-    checkpoint_path = Path(checkpoint_dir)
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
-
-    epochs: List[int] = []
-    losses: List[float] = []
-    bleus: List[float] = []
-    times: List[float] = []
-
-    best_bleu = float("-inf")
-    best_epoch = None
-    epochs_since_best = 0
-
-    bleu_kwargs = evaluate_bleu_kwargs or {}
-
-    for epoch in range(1, num_epochs + 1):
-        encoder.train()
-        decoder.train()
-
-        start_time = time.perf_counter()
-        running_loss = 0.0
-        batches_seen = 0
-
-        for imgs, caps in train_loader:
-            imgs = imgs.to(device)
-            caps = caps.to(device)
+    with torch.no_grad():
+        for i, (imgs, caps, txt) in enumerate(loader):
+            if i >= n: break
+            imgs, caps = imgs.to(device), caps.to(device)
 
             feats = encoder(imgs)
             outputs = decoder(feats, caps[:, :-1])
+            preds = outputs.argmax(2).cpu().numpy()
+            refs = caps.cpu().numpy()
 
+            for r, p in zip(refs, preds):
+                ref_caption = [inv_vocab.get(idx, '') for idx in r if idx > 3]
+                hyp_caption = [inv_vocab.get(idx, '') for idx in p if idx > 3]
+
+                if hyp_caption:
+                    score = sentence_bleu(
+                        [ref_caption], hyp_caption,
+                        smoothing_function=smooth,
+                        weights=(0.25, 0.25, 0.25, 0.25)
+                    )
+                    scores.append(score)
+
+    return sum(scores) / len(scores) if scores else 0
+
+
+def train(
+    caption_txt="captions.txt",
+    image_dir="Images/",
+    vocab_size=1000,
+    embed_size=256,
+    hidden_size=512,
+    lr=0.001,
+    num_epochs=50,
+    eval_every=10,
+):
+
+    print(" Loading & preprocessing data...")
+    df = clean_captions_txt(image_dir, caption_txt)
+    train_ds, dev_ds, test_ds, vocab = preprocess_dataset(df, image_dir)
+
+    inv_vocab = {v: k for k, v in vocab.items()}
+    vocab_size = len(vocab)
+
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=16, shuffle=True)
+    dev_loader = torch.utils.data.DataLoader(dev_ds, batch_size=16)
+
+    print(f" Vocab size: {vocab_size}")
+    print(f" Train samples: {len(train_ds)}")
+
+    encoder = EncoderCNN(embed_size).to(device)
+    decoder = DecoderRNN(embed_size, hidden_size, vocab_size).to(device)
+
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+    optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=lr)
+
+    epoch_losses, epoch_bleus, epoch_times, epoch_list = [], [], [], []
+
+    print(" Starting Training...\n")
+
+    for epoch in range(1, num_epochs + 1):
+        start_epoch = time.time()
+        encoder.train()
+        decoder.train()
+
+        for imgs, caps, txt in train_loader:
+            imgs, caps = imgs.to(device), caps.to(device)
+            feats = encoder(imgs)
+            outputs = decoder(feats, caps[:, :-1])
             loss = criterion(outputs.reshape(-1, vocab_size), caps.reshape(-1))
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            running_loss += loss.item()
-            batches_seen += 1
+        epoch_time = time.time() - start_epoch
 
-        epoch_time = time.perf_counter() - start_time
-        avg_loss = running_loss / max(batches_seen, 1)
+        if epoch == 1 or epoch % eval_every == 0 or epoch == num_epochs:
+            bleu = evaluate_bleu(dev_loader, encoder, decoder, inv_vocab, device)
 
-        should_evaluate = epoch == 1 or epoch % eval_interval == 0 or epoch == num_epochs
+            epoch_losses.append(loss.item())
+            epoch_bleus.append(bleu)
+            epoch_times.append(epoch_time)
+            epoch_list.append(epoch)
 
-        if should_evaluate:
-            decoder.eval()
-            encoder.eval()
+            torch.save({
+                'epoch': epoch,
+                'encoder_state': encoder.state_dict(),
+                'decoder_state': decoder.state_dict(),
+                'optimizer_state': optimizer.state_dict(),
+                'loss': loss.item()
+            }, f'checkpoint_epoch_{epoch}.pth')
 
-            with torch.no_grad():
-                bleu = evaluate_bleu_fn(dev_loader, **bleu_kwargs)
+            print(f" Epoch {epoch}/{num_epochs} - Loss: {loss.item():.4f} | BLEU: {bleu:.4f} | Time: {epoch_time:.2f}s")
 
-            epochs.append(epoch)
-            losses.append(avg_loss)
-            bleus.append(bleu)
-            times.append(epoch_time)
+    print("\n🎯 Training Complete")
+    print(f"Total time (s): {sum(epoch_times):.2f}")
 
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "encoder_state": encoder.state_dict(),
-                    "decoder_state": decoder.state_dict(),
-                    "optimizer_state": optimizer.state_dict(),
-                    "loss": avg_loss,
-                    "bleu": bleu,
-                },
-                checkpoint_path / f"checkpoint_epoch_{epoch}.pth",
-            )
+    best_epoch = epoch_list[epoch_bleus.index(max(epoch_bleus))]
+    print(f"🏆 Best Epoch: {best_epoch} (BLEU: {max(epoch_bleus):.4f})")
 
-            if verbose:
-                print(
-                    f"Epoch {epoch}: loss={avg_loss:.4f}, bleu={bleu:.4f}, "
-                    f"time={epoch_time:.2f}s"
-                )
-
-            if bleu > best_bleu + min_delta:
-                best_bleu = bleu
-                best_epoch = epoch
-                epochs_since_best = 0
-            else:
-                epochs_since_best += 1
-                if patience and epochs_since_best >= patience:
-                    if verbose:
-                        print(
-                            f"Early stopping triggered at epoch {epoch} "
-                            f"(best BLEU {best_bleu:.4f} at epoch {best_epoch})."
-                        )
-                    break
-
-    metrics = TrainingMetrics(
-        epochs=epochs,
-        losses=losses,
-        bleus=bleus,
-        times=times,
-        best_epoch=best_epoch,
-        best_bleu=best_bleu if best_epoch is not None else None,
-    )
-
-    if verbose:
-        if metrics.best_epoch is not None:
-            print(
-                f"Best epoch based on BLEU: {metrics.best_epoch} "
-                f"with BLEU {metrics.best_bleu:.4f}"
-            )
-        print(f"Total tracked training time: {sum(metrics.times):.2f}s")
-
-    return metrics
-
-
-def plot_training_metrics(
-    metrics: TrainingMetrics,
-    *,
-    save_path: Optional[Path | str] = None,
-) -> None:
-    """Plot loss and BLEU trends using Matplotlib."""
-    import matplotlib.pyplot as plt
-
-    if not metrics.epochs:
-        raise ValueError("No metrics recorded; cannot plot empty results.")
-
+    #  Plotting
     plt.figure(figsize=(10, 4))
 
     plt.subplot(1, 2, 1)
-    plt.plot(metrics.epochs, metrics.losses, marker="o")
-    plt.title("Loss per Epoch")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
+    plt.plot(epoch_list, epoch_losses, marker='o')
+    plt.title('Loss per Epoch')
 
     plt.subplot(1, 2, 2)
-    plt.plot(metrics.epochs, metrics.bleus, marker="o", color="orange")
-    plt.title("BLEU per Epoch")
-    plt.xlabel("Epoch")
-    plt.ylabel("BLEU Score")
+    plt.plot(epoch_list, epoch_bleus, marker='o')
+    plt.title('BLEU score per Epoch')
 
     plt.tight_layout()
+    plt.show()
 
-    if save_path is not None:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(save_path)
-    else:
-        plt.show()
+
+if _name_ == "_main_":
+    train()
